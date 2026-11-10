@@ -1,0 +1,55 @@
+from playwright.sync_api import sync_playwright
+from pathlib import Path
+root=Path(__file__).resolve().parents[1]
+html=(root.parent/'Integracao_de_Sistemas_de_Energias_Renovaveis_standalone.html').read_text(encoding='utf-8')
+with sync_playwright() as p:
+ b=p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+ page=b.new_page(viewport={'width':1440,'height':960},device_scale_factor=1)
+ errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+ page.set_content(html,wait_until='load')
+ assert page.locator('.hero-map-launch img').evaluate('(el)=>el.complete&&el.naturalWidth===1280')
+ page.locator('.hero-map-launch').click()
+ assert page.locator('#view-map').is_visible()
+ assert page.locator('[data-view=map]').get_attribute('class')=='selected'
+ assert page.locator('.map-backdrop').evaluate('(el)=>el.complete&&el.naturalWidth===1280')
+ page.locator('.map-spot[data-map-component=solar]').click()
+ assert 'Solar fotovoltaica' in page.locator('#map-detail').inner_text()
+ assert 'Sistema fotovoltaico' in page.locator('#comp-name').inner_text()
+ initial=page.locator('#map-solar-value').inner_text()
+ page.evaluate('EnergyLabTest.setParameter("irr",0)')
+ assert page.locator('#map-solar-value').inner_text() != initial
+ assert page.locator('#energy-map-stage').evaluate('(el)=>el.classList.contains("map-night")')
+ assert not page.locator('#map-route-solar').evaluate('(el)=>el.classList.contains("is-active")')
+ print('✓ Mapa vivo está conectado ao motor solar')
+ page.evaluate('EnergyLabTest.setParameter("irr",1000)')
+ assert page.locator('#map-route-solar').evaluate('(el)=>el.classList.contains("is-active")')
+ page.locator('.map-spot[data-map-info=hydro]').click()
+ assert 'não entra nos resultados' in page.locator('#map-detail').inner_text()
+ print('✓ Pontos contextuais informam limites do modelo')
+ page.evaluate('EnergyLabTest.loadScenario("highload")')
+ assert page.locator('#map-alert').is_visible()
+ assert 'Não atendida' in page.locator('#map-alert').inner_text()
+ print('✓ Déficit refletido visualmente no mapa')
+ page.evaluate('EnergyLabTest.loadScenario("base")')
+ page.locator('.map-spot[data-map-component=wind]').click()
+ assert 'Energia eólica' in page.locator('#map-detail').inner_text()
+ page.locator('#motion-toggle').click()
+ assert page.evaluate('document.documentElement.classList.contains("reduced-motion")')
+ assert page.locator('.map-wind-motion').count()==1
+ print('✓ Seleção de componente e redução de movimento')
+ page.locator('#motion-toggle').click()
+ page.screenshot(path=str(root.parent/'EnergyLab_preview_mapa_vivo.png'),full_page=False)
+ page.locator('#view-map').screenshot(path=str(root.parent/'EnergyLab_preview_mapa_detalhe.png'))
+ for width,height in [(768,1024),(390,844),(320,720)]:
+  m=b.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
+  m.set_content(html,wait_until='load');m.locator('[data-page=sim]').first.click();m.locator('[data-view=map]').click()
+  assert m.locator('#view-map').is_visible()
+  assert m.evaluate('document.documentElement.scrollWidth-document.documentElement.clientWidth')<=2
+  rect=m.locator('.map-stage').bounding_box()
+  assert rect['width']>=250 and rect['height']>=160, (width,rect)
+  assert m.locator('#map-solar-value').inner_text()
+  if width==390:m.locator('#view-map').screenshot(path=str(root.parent/'EnergyLab_preview_mapa_mobile.png'))
+  m.close()
+  print('✓ Mapa responsivo em',width,'px')
+ assert not errors,errors
+ b.close()
